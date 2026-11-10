@@ -1,0 +1,252 @@
+{
+  "products": {
+    "apples": {
+      "per100g": {
+        "calories": 52,
+        "protein": 0.3,
+        "fat": 0.2,
+        "carbs": 14
+      },
+      "grams": {
+        "": 150
+      }
+    },
+    "baking powder": {
+      "per100g": {
+        "calories": 53,
+        "protein": 0,
+        "fat": 0,
+        "carbs": 28
+      },
+      "grams": {
+        "tsp": 4
+      }
+    },
+    "basil": {
+      "per100g": {
+        "calories": 23,
+        "protein": 3.2,
+        "fat": 0.6,
+        "carbs": 2.7
+      },
+      "grams": {
+        "handful": 15
+      }
+    },
+    "brown sugar": {
+      "per100g": {
+        "calories": 384,
+        "protein": 0,
+        "fat": 0,
+        "carbs": 97
+      },
+      "grams": {}
+    },
+    "butter": {
+      "per100g": {
+        "calories": 737,
+        "protein": 0.7,
+        "fat": 81,
+        "carbs": 0.6
+      },
+      "grams": {
+        "tbsp": 14
+      }
+    },
+    "buttermilk": {
+      "per100g": {
+        "calories": 40,
+        "protein": 3.3,
+        "fat": 0.9,
+        "carbs": 4.8
+      },
+      "grams": {
+        "ml": 1.03
+      }
+    },
+    "cinnamon": {
+      "per100g": {
+        "calories": 247,
+        "protein": 4,
+        "fat": 1.2,
+        "carbs": 81
+      },
+      "grams": {
+        "tsp": 2.6
+      }
+    },
+    "coconut milk": {
+      "per100g": {
+        "calories": 180,
+        "protein": 1.8,
+        "fat": 18,
+        "carbs": 3
+      },
+      "grams": {
+        "ml": 1
+      }
+    },
+    "cold butter": {
+      "per100g": {
+        "calories": 744,
+        "protein": 0.6,
+        "fat": 82,
+        "carbs": 0.6
+      },
+      "grams": {}
+    },
+    "dark chocolate": {
+      "per100g": {
+        "calories": 570,
+        "protein": 7.8,
+        "fat": 42,
+        "carbs": 46
+      },
+      "grams": {}
+    },
+    "eggs": {
+      "per100g": {
+        "calories": 143,
+        "protein": 12.6,
+        "fat": 9.5,
+        "carbs": 0.7
+      },
+      "grams": {
+        "": 50
+      }
+    },
+    "flour": {
+      "per100g": {
+        "calories": 341,
+        "protein": 9.4,
+        "fat": 1.3,
+        "carbs": 71
+      },
+      "grams": {}
+    },
+    "garlic": {
+      "per100g": {
+        "calories": 149,
+        "protein": 6.4,
+        "fat": 0.5,
+        "carbs": 33
+      },
+      "grams": {
+        "cloves": 3
+      }
+    },
+    "ginger": {
+      "per100g": {
+        "calories": 80,
+        "protein": 1.8,
+        "fat": 0.8,
+        "carbs": 18
+      },
+      "grams": {
+        "tbsp": 8
+      }
+    },
+    "gluten-free flour blend": {
+      "per100g": {
+        "calories": 350,
+        "protein": 6,
+        "fat": 1.5,
+        "carbs": 76
+      },
+      "grams": {}
+    },
+    "lime juice": {
+      "per100g": {
+        "calories": 25,
+        "protein": 0.4,
+        "fat": 0.1,
+        "carbs": 8.4
+      },
+      "grams": {
+        "tbsp": 15
+      }
+    },
+    "mint": {
+      "per100g": {
+        "calories": 44,
+        "protein": 3.3,
+        "fat": 0.7,
+        "carbs": 8
+      },
+      "grams": {}
+    },
+    "olive oil": {
+      "per100g": {
+        "calories": 884,
+        "protein": 0,
+        "fat": 100,
+        "carbs": 0
+      },
+      "grams": {
+        "tbsp": 13.5
+      }
+    },
+    "salt": {
+      "per100g": {
+        "calories": 0,
+        "protein": 0,
+        "fat": 0,
+        "carbs": 0
+      },
+      "grams": {
+        "tsp": 6
+      }
+    },
+    "sugar": {
+      "per100g": {
+        "calories": 400,
+        "protein": 0,
+        "fat": 0,
+        "carbs": 100
+      },
+      "grams": {
+        "tbsp": 12.5
+      }
+    },
+    "tomatoes": {
+      "per100g": {
+        "calories": 18,
+        "protein": 0.9,
+        "fat": 0.2,
+        "carbs": 3.9
+      },
+      "grams": {}
+    },
+    "vegetable stock": {
+      "per100g": {
+        "calories": 4,
+        "protein": 0.2,
+        "fat": 0.1,
+        "carbs": 0.6
+      },
+      "grams": {
+        "ml": 1
+      }
+    },
+    "watermelon": {
+      "per100g": {
+        "calories": 30,
+        "protein": 0.6,
+        "fat": 0.2,
+        "carbs": 7.6
+      },
+      "grams": {}
+    },
+    "xanthan gum": {
+      "per100g": {
+        "calories": 330,
+        "protein": 0,
+        "fat": 0,
+        "carbs": 78
+      },
+      "grams": {
+        "tsp": 3
+      }
+    }
+  }
+}

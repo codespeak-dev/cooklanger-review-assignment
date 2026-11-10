@@ -1,0 +1,269 @@
+{
+  "messages": [
+    {
+      "id": "m1",
+      "role": "user",
+      "text": "I want to add a new feature – diet modes. The idea is following. Each user can have their own profile, that explains their food restrictions, e.g. vegetarian, low fodmap, nuts allergy etc. Each recipe is checked against these requirements, and recipes that don't pass must be hidden from the list. Also, our remix mode can be tuned to produce the version of this recipe that will suite the diet.\n\nSome other ideas:\n- I want to have both predefined profiles, and an ability to write a new one\n- Let's stick to LLM verification of each recipe\n\nask questions to clarify stuff"
+    },
+    {
+      "id": "m2",
+      "role": "tool",
+      "text": "Rename session and survey remix and key bindings"
+    },
+    {
+      "id": "m3",
+      "role": "assistant",
+      "text": "cooklanger is a local, single-machine app. What does 'each user has their own profile' mean in practice?\n- One active, combinable (Recommended): Several profiles stored (e.g. 'me', 'Anna'); you can turn on one or more at once and recipes are checked against all of them together, for cooking for a household. Lives in .cooklanger/ beside the recipes.\n- Single active profile: Several profiles exist but exactly one is active at a time; switching is a key in the TUI or a --diet flag.\n- Per OS user, in home dir: One profile per machine user, kept in ~/.config/cooklanger, applying to every recipe folder that user opens.\n\nChecking means one LLM call per recipe per profile. When should recipes be checked, given the list needs marks on recipes you haven't opened yet?\n- Background scan, cached (Recommended): On startup, unchecked recipes are checked in the background (cheap model, e.g. Haiku) and verdicts cached in .cooklanger/ by recipe content + profile, so only new/edited recipes or changed profiles cost calls. Marks fill in as they arrive.\n- Lazily on open: Like the product registry: a recipe is checked when first opened. Cheaper, but the list can only mark recipes you've already looked at.\n- Explicit command: A key / --check flag runs the check over the library on demand; nothing is sent to the API otherwise.\n\nHow is a profile described, and how does a user write a new one?\n- Free-text prose (Recommended): A profile is a name plus plain-language restrictions ('no meat or fish; eggs and dairy fine; severe peanut allergy incl. traces'), handed to the LLM as-is. Predefined ones ship as built-in text. New ones written in a TUI overlay or by editing the JSON file.\n- Structured tags + notes: Pick from a fixed set of restriction tags (vegetarian, vegan, gluten-free, low-FODMAP, nut-free...) plus an optional free-text note. More consistent, less expressive.\n- Markdown files: Each profile is a .md file in .cooklanger/diets/, written in your editor; predefined ones are copied there on first use so you can tweak them.\n\nHow should remix tie into the diet?\n- Dedicated key + always-on (Recommended): A new key (e.g. R) remixes 'to fit my diet' with no note needed; and the ordinary r remix also respects the active profile, so no remix ever breaks your diet. The result is checked like any other recipe.\n- Dedicated key only: New key makes the diet-fitting version; ordinary r remix ignores the profile.\n- Prefill the r prompt: On a failing recipe, r opens with the note prefilled ('make this fit: vegetarian, nut-free'), which you can edit before sending."
+    },
+    {
+      "id": "m4",
+      "role": "user",
+      "text": "\"cooklanger is a local, single-machine app. What does 'each user has their own profile' mean in practice?\" → Single active profile\n\"Checking means one LLM call per recipe per profile. When should recipes be checked, given the list needs marks on recipes you haven't opened yet?\" → Background scan, cached (Recommended)\n\"How is a profile described, and how does a user write a new one?\" → Free-text prose (Recommended)\n\"How should remix tie into the diet?\" → Dedicated key + always-on (Recommended)"
+    },
+    {
+      "id": "m5",
+      "role": "assistant",
+      "text": "What can a check say about a recipe? (Allergies make 'not sure' matter — e.g. 'stock' may hide gluten, 'chocolate' may carry nut traces.)\n- Pass / doubtful / fails (Recommended): Three verdicts. 'Doubtful' flags ingredients that depend on the product bought (check the label). Fails and doubtful each list the offending ingredients and why, shown in the preview.\n- Pass / fails only: Binary. Anything uncertain counts as a fail, with the reason given.\n\nWhich predefined profiles should ship?\n- Vegetarian & vegan: Vegetarian, vegan, pescatarian.\n- Allergies: Nut-free (tree nuts + peanuts), gluten-free / coeliac, dairy-free, egg-free, shellfish-free.\n- Medical diets: Low-FODMAP, low-sodium, diabetic-friendly / low-sugar.\n- Religious: Halal, kosher-style (no pork/shellfish, no meat+dairy).\n\nHow is the active profile picked and authored?\n- TUI picker + flag (Recommended): A key opens a picker of presets + your own profiles, with 'none' and 'new…' (name + text overlay). Choice persists in .cooklanger/ across sessions; --diet <name> overrides for a run.\n- TUI picker, session only: Same picker, but the choice lasts only for the session (like sort order); starts with no diet.\n- Config file only: Edit .cooklanger/diets.json to define and activate; no TUI for it."
+    },
+    {
+      "id": "m6",
+      "role": "user",
+      "text": "\"What can a check say about a recipe? (Allergies make 'not sure' matter — e.g. 'stock' may hide gluten, 'chocolate' may carry nut traces.)\" → Pass / fails only\n\"Which predefined profiles should ship?\" → Vegetarian & vegan, Allergies\n\"How is the active profile picked and authored?\" → TUI picker, session only"
+    },
+    {
+      "id": "m7",
+      "role": "assistant",
+      "text": "I asked seven questions over two rounds. Here's what I took from your answers, plus defaults I'm proposing for what's still open. I haven't changed any code yet.\n\n**What you chose**\n- **Profiles:** each one is a name plus restrictions in plain language, which is passed to the LLM unchanged. The built-in ones are vegetarian, vegan, pescatarian, nut-free, gluten-free, dairy-free, egg-free and shellfish-free. You can write new ones in a TUI overlay or by editing a JSON file.\n- **Active profile:** only one at a time, chosen from a TUI picker. It lasts for the session only, so every session starts with no diet.\n- **Checking:** after startup, recipes are checked in the background against the active profile. Each answer is a plain \"passes\" or \"fails\" (anything uncertain counts as a fail). Answers are cached in `.cooklanger/` per recipe content and profile, so the LLM is only called again for new or edited recipes or a changed profile.\n- **Remix:** a new key remixes the recipe to fit the diet with no note needed. The normal `r` remix also follows the active profile, and anything a remix produces gets checked like any other recipe.\n\n**Open points, with my proposed defaults**\n1. **Failing recipes.** Rather than taking them off the list, I'd keep a failing recipe in place, dimmed and marked with a ✗, so you can still find it and remix it to fit. `V` hides failing recipes when you want them out of the way.\n2. **Where to see why a recipe fails.** With nothing but a ✗, a verdict can't be checked. I'd add one line under the title, like `✗ vegetarian: chicken stock, anchovies`. Keep it or drop it?\n3. **`--diet <name>` flag.** You chose session-only, so the flag would only set the profile a session starts with. I'd keep it, since it saves picking the profile every time you start. OK?\n4. **Where custom profiles live.** `.cooklanger/diets.json` beside the recipes, like favourites. Profiles you write are saved there; only the choice of active profile is per-session. In the TUI you can create and delete profiles, and you edit them in the file. OK?\n5. **Keys.** `D` opens the diet picker (with \"none\" and \"new…\"), `R` is the diet remix, and `V` is the \"fits my diet\" filter. With no diet active, `R` and `V` open the picker instead. Do you want different letters?\n6. **Recipes not checked yet, or whose check failed.** I'd show a dim `·` while pending. The filter would hide only recipes known to fail, so pending ones stay visible. That's the risky choice for allergies, so tell me if pending recipes should be hidden too.\n7. **Filter combined with favourites.** `F` and `V` stack, so you can see favourites that fit your diet.\n8. **Cost and speed.** I'd use a Haiku-class model for checks with about 4 requests at a time, and keep Sonnet for remixes. A large library on first run costs one cheap call per recipe.\n9. **`--list`.** No diet marks in piped output, but `--list --diet vegan` would print only the recipes that pass. Skip that if you don't want it.\n\nAnswer just the numbers you want changed, and I'll write a short plan and then build it."
+    },
+    {
+      "id": "m8",
+      "role": "user",
+      "text": "I don't need the flag. Also, drop the reason line, I don't need to see why a recipe fails\n\nother than that go for it"
+    },
+    {
+      "id": "m9",
+      "role": "tool",
+      "text": "Read favourites, registry, cli, remix tail"
+    },
+    {
+      "id": "m10",
+      "role": "tool",
+      "text": "Read src/browser.ts"
+    },
+    {
+      "id": "m11",
+      "role": "tool",
+      "text": "Read src/layout.ts"
+    },
+    {
+      "id": "m12",
+      "role": "tool",
+      "text": "Read recipes, env, keys, tests and README"
+    },
+    {
+      "id": "m13",
+      "role": "tool",
+      "text": "Loaded the claude-api skill"
+    },
+    {
+      "id": "m14",
+      "role": "tool",
+      "text": "Read notes module and test structure"
+    },
+    {
+      "id": "m15",
+      "role": "tool",
+      "text": "Read layout screen tests"
+    },
+    {
+      "id": "m16",
+      "role": "tool",
+      "text": "Wrote src/diets.ts"
+    },
+    {
+      "id": "m17",
+      "role": "tool",
+      "text": "Add diet support to the remix prompt"
+    },
+    {
+      "id": "m18",
+      "role": "tool",
+      "text": "Add diet marks, picker overlay and hints to layout"
+    },
+    {
+      "id": "m19",
+      "role": "assistant",
+      "text": "Tidy up the overlay refactor."
+    },
+    {
+      "id": "m20",
+      "role": "tool",
+      "text": "Share the box drawing between the note overlay and the picker"
+    },
+    {
+      "id": "m21",
+      "role": "tool",
+      "text": "Add abort signal and title wording"
+    },
+    {
+      "id": "m22",
+      "role": "tool",
+      "text": "Check indentation of create call"
+    },
+    {
+      "id": "m23",
+      "role": "tool",
+      "text": "Re-indent the create call parameters"
+    },
+    {
+      "id": "m24",
+      "role": "tool",
+      "text": "Add diet state, drafts and picker view to browser"
+    },
+    {
+      "id": "m25",
+      "role": "tool",
+      "text": "Wire diet checks, picker and keys into browser; typecheck"
+    },
+    {
+      "id": "m26",
+      "role": "tool",
+      "text": "Inspect openDraft"
+    },
+    {
+      "id": "m27",
+      "role": "tool",
+      "text": "Fix the draft types, typecheck and test"
+    },
+    {
+      "id": "m28",
+      "role": "tool",
+      "text": "Share the cache read and drop checks on quit"
+    },
+    {
+      "id": "m29",
+      "role": "tool",
+      "text": "Wrote src/diets.test.ts"
+    },
+    {
+      "id": "m30",
+      "role": "tool",
+      "text": "Read existing remix prompt and overlay tests"
+    },
+    {
+      "id": "m31",
+      "role": "tool",
+      "text": "Add remix and layout tests, run suite"
+    },
+    {
+      "id": "m32",
+      "role": "tool",
+      "text": "Fix test expectations and rerun"
+    },
+    {
+      "id": "m33",
+      "role": "tool",
+      "text": "Check for .env and build"
+    },
+    {
+      "id": "m34",
+      "role": "tool",
+      "text": "Run two live diet checks against a sample recipe"
+    },
+    {
+      "id": "m35",
+      "role": "tool",
+      "text": "Show the sample recipe"
+    },
+    {
+      "id": "m36",
+      "role": "tool",
+      "text": "Edited src/diets.ts"
+    },
+    {
+      "id": "m37",
+      "role": "tool",
+      "text": "Rebuild and rerun live checks on pass and fail cases"
+    },
+    {
+      "id": "m38",
+      "role": "tool",
+      "text": "Drive the TUI in a pty: pick vegan, filter"
+    },
+    {
+      "id": "m39",
+      "role": "tool",
+      "text": "Drive the TUI: open picker, pick vegan, filter"
+    },
+    {
+      "id": "m40",
+      "role": "tool",
+      "text": "Add a hint set, test, and drive the new-diet flow"
+    },
+    {
+      "id": "m41",
+      "role": "tool",
+      "text": "List dessert ingredients"
+    },
+    {
+      "id": "m42",
+      "role": "tool",
+      "text": "Probe check consistency for a custom diet"
+    },
+    {
+      "id": "m43",
+      "role": "tool",
+      "text": "Ask the model why the crumble fails"
+    },
+    {
+      "id": "m44",
+      "role": "tool",
+      "text": "Add hidden reasoning field and rerun probes"
+    },
+    {
+      "id": "m45",
+      "role": "tool",
+      "text": "Version the verdict cache key"
+    },
+    {
+      "id": "m46",
+      "role": "assistant",
+      "text": "Now document it in CLAUDE.md."
+    },
+    {
+      "id": "m47",
+      "role": "tool",
+      "text": "Document diets in CLAUDE.md, rebuild, test"
+    },
+    {
+      "id": "m48",
+      "role": "tool",
+      "text": "Confirm the build succeeds and dist is fresh"
+    },
+    {
+      "id": "m49",
+      "role": "assistant",
+      "text": "Diet modes are in. I tested the TUI on a copy of `recipes/`, so your real `.cooklanger` folder hasn't been touched. All 292 tests pass, `dist/` is rebuilt, and nothing is committed.\n\n**How it works**\n- **`D`** opens a picker with \"none\", the 8 built-in diets, your own diets, and \"new…\".\n  - \"new…\" asks for a name, then what the diet rules out.\n  - If you type the name of an existing diet, the text is prefilled from it. Saving under a preset's name replaces that preset.\n  - `d` deletes one of your own diets after you confirm with `y`.\n  - The chosen diet lasts only for the session.\n- **Checks:** turning a diet on checks every recipe in the background with Claude Haiku 5.5, four at a time. Each check gives only pass or fail, and anything uncertain counts as a fail.\n  - Results are cached in `.cooklanger/diet-checks.json`, so only new or edited recipes, or a changed diet, cost a call. Notes don't count as an edit.\n  - Switching diet or quitting cancels the checks still running.\n- **Marks:** a failing recipe is dimmed with a red ✗ at the right edge, one not checked yet shows a dim `·`, and a passing one has no mark. No reason is shown anywhere. The status line shows the active diet next to the position, e.g. `vegan · 1/4`.\n- **`V`** hides recipes known to fail. Unchecked ones stay visible, the pane title becomes `fits vegan`, and it combines with `F`.\n- **`R`** remixes the selected recipe to fit the diet without asking for a note. If the recipe already passes, it tells you so instead.\n- **`r`** with a diet on also keeps to it. Every remix is checked like any other recipe. With no diet on, `R` and `V` open the picker.\n- Your own diets are saved in `.cooklanger/diets.json`. The new code is in `src/diets.ts`, with changes to `browser.ts`, `layout.ts` and `remix.ts`. I also added a \"Diets\" section to `CLAUDE.md`.\n\n**Calibration fix**\nMy first version of the check prompt was too strict. It failed a plain vegan tomato soup, and it failed the apple crumble against a custom \"no oats\" diet even though the recipe has no oats; the model was judging what crumbles usually contain. I made two changes:\n- The model now writes a short reasoning, ingredient by ingredient, before its verdict. It's never shown to you.\n- The prompt says to judge the ingredients the recipe actually lists.\n\nAfter that, 5 test cases and 3 repeated runs on real recipes all came back correct. The live checks cost a few cents of Haiku calls.\n\n**Not tested:** a live `R` remix, which would have meant a Sonnet call. The only change on that path is the added diet section in the remix prompt, and that has unit tests.\n\nWould you like me to commit these changes?"
+    },
+    {
+      "id": "m50",
+      "role": "user",
+      "text": "/spindle:review-requirements"
+    },
+    {
+      "id": "m51",
+      "role": "tool",
+      "text": "Open the requirements review page"
+    },
+    {
+      "id": "m52",
+      "role": "tool",
+      "text": "Wait for the review to be handed back"
+    },
+    {
+      "id": "m53",
+      "role": "assistant",
+      "text": "http://127.0.0.1:7838/review/cooklanger-269763/d2e0ebdc-a22f-44b1-b483-c9452f17a1e6\n\nHere's the review page for the requirements this session recorded."
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "name": "cooklanger",
+  "version": "0.1.0",
+  "description": "A CLI recipe manager for Cooklang recipes.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "cooklanger": "dist/cli.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc && chmod +x dist/cli.js",
+    "dev": "tsx src/cli.ts",
+    "test": "tsx --test src/*.test.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.115.0",
+    "@cooklang/cooklang": "^0.18.7",
+    "commander": "^15.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "tsx": "^4.23.5",
+    "typescript": "^7.0.2"
+  }
+}

@@ -1,0 +1,454 @@
+{
+  "requirements": [
+    {
+      "id": "160bd5cc6d80",
+      "change": "added",
+      "statement": "The system shall provide predefined diet profiles",
+      "slots": {
+        "scope": "the system",
+        "preconditions": [],
+        "verb": "provide",
+        "object": "predefined diet profiles",
+        "modifiers": []
+      },
+      "quote": "I want to have both predefined profiles",
+      "source": {
+        "messageId": "m1",
+        "author": "user"
+      },
+      "code": [
+        {
+          "file": "src/diets.ts",
+          "lines": [
+            11,
+            15
+          ]
+        },
+        {
+          "file": "src/diets.ts",
+          "lines": [
+            17,
+            58
+          ]
+        },
+        {
+          "file": "src/diets.test.ts",
+          "lines": [
+            61,
+            81
+          ]
+        }
+      ]
+    },
+    {
+      "id": "37504b29f718",
+      "change": "added",
+      "statement": "The system shall let the user write a new diet profile in the TUI, as a name plus restrictions in plain words",
+      "slots": {
+        "scope": "the system",
+        "preconditions": [],
+        "verb": "let",
+        "object": "the user write a new diet profile in the TUI",
+        "modifiers": [
+          "as a name plus restrictions in plain words"
+        ]
+      },
+      "quote": "an ability to write a new one",
+      "source": {
+        "messageId": "m1",
+        "author": "user"
+      },
+      "code": [
+        {
+          "file": "src/diets.ts",
+          "lines": [
+            96,
+            103
+          ]
+        },
+        {
+          "file": "src/diets.ts",
+          "lines": [
+            115,
+            120
+          ]
+        },
+        {
+          "file": "src/browser.ts",
+          "lines": [
+            525,
+            536
+          ]
+        },
+        {
+          "file": "src/browser.ts",
+          "lines": [
+            927,
+            931
+          ]
+        },
+        {
+          "file": "src/browser.ts",
+          "lines": [
+            991,
+            1017
+          ]
+        },
+        {
+          "file": "src/browser.ts",
+          "lines": [
+            1149,
+            1154
+          ]
+        },
+        {
+          "file": "src/diets.test.ts",
+          "lines": [
+            83,
+            121
+          ]
+        }
+      ]
+    },
+    {
+      "id": "bdf75c9272ec",
+      "change": "added",
+      "statement": "The recipe manager CLI shall keep exactly one diet profile active at a time",
+      "slots": {
+        "scope": "the recipe manager CLI",
+        "preconditions": [],
+        "verb": "keep",
+        "object": "exactly one diet profile active at a time",
+        "modifiers": []
+      },
+      "quote": "Several profiles exist but exactly one is active at a time",
+      "source": {
+        "messageId": "m3",
+        "author": "model"
+      },
+      "code": [
+        {
+          "file": "src/browser.ts",
+          "lines": [
+            283,
+            283
+          ]
+        },
+        {
+          "file": "src/browser.ts",
+          "lines": [
+            883,
+            905
+          ]
+        },
+        {
+          "file": "src/browser.ts",
+          "lines": [
+            907,
+            921
+          ]
+        },
+        {
+          "file": "src/browser.ts",
+          "lines": [
+            932,
+            932
+          ]
+        },
+        {
+          "file": "src/browser.ts",
+          "lines": [
+            1608,
+            1610
+          ]
+        }
+      ]
+    },
+    {
+      "id": "e7bbb9e32266",
+      "change": "added",
+      "statement": "The system shall check each recipe against the active diet profile with an LLM, answering only pass or fail and counting an uncertain recipe as failing",
+      "slots": {
+        "scope": "the system",
+        "preconditions": [],
+        "verb": "check",
+        "object": "each recipe against the active diet profile with an LLM",
+        "modifiers": [
+          "answering only pass or fail and counting an uncertain recipe as failing"
+        ]
+      },
+      "quote": "Let's stick to LLM verification of each recipe",
+      "source": {
+        "messageId": "m1",
+        "author": "user"
+      },
+      "code": [
+        {
+          "file": "src/diets.ts",
+          "lines": [
+            169,
+            175
+          ]
+        },
+        {
+          "file": "src/diets.ts",
+          "lines": [
+            177,
+            192
+          ]
+        },
+        {
+          "file": "src/diets.ts",
+          "lines": [
+            196,
+            210
+          ]
+        },
+        {
+          "file": "src/diets.ts",
+          "lines": [
+            212,
+            261
+          ]
+        },
+        {
+          "file": "src/diets.test.ts",
+          "lines": [
+            206,
+            216
+          ]
+        }
+      ]
+    },
+    {
+      "id": "5fd41d05f948",
+      "change": "added",
+      "statement": "The system shall cache diet check verdicts, keyed by recipe content and diet profile, so that only new or edited recipes, or a changed profile, need an LLM call",
+      "slots": {
+        "scope": "the system",
+        "preconditions": [],
+        "verb": "cache",
+        "object": "diet check verdicts",
+        "modifiers": [
+          "keyed by recipe content and diet profile"
+        ],
+        "why": "only new or edited recipes, or a changed profile, need an LLM call"
+      },
+      "quote": "verdicts cached in .cooklanger/ by recipe content + profile, so only new/edited recipes or changed profiles cost calls",
+      "source": {
+        "messageId": "m3",
+        "author": "model"
+      },
+      "code": [
+        {
+          "file": "src/diets.ts",
+          "lines": [
+            130,
+            163
+          ]
+        },
+        {
+          "file": "src/browser.ts",
+          "lines": [
+            789,
+            798
+          ]
+        },
+        {
+          "file": "src/browser.ts",
+          "lines": [
+            840,
+            881
+          ]
+        },
+        {
+          "file": "src/diets.test.ts",
+          "lines": [
+            158,
+            195
+          ]
+        }
+      ]
+    },
+    {
+      "id": "9319a4a8b132",
+      "change": "added",
+      "statement": "When a recipe fails the diet check, the recipe list shall hide that recipe",
+      "slots": {
+        "scope": "the recipe list",
+        "preconditions": [],
+        "trigger": "a recipe fails the diet check",
+        "verb": "hide",
+        "object": "that recipe",
+        "modifiers": []
+      },
+      "quote": "recipes that don't pass must be hidden from the list",
+      "source": {
+        "messageId": "m1",
+        "author": "user"
+      },
+      "code": [
+        {
+          "file": "src/browser.ts",
+          "lines": [
+            669,
+            682
+          ]
+        },
+        {
+          "file": "src/browser.ts",
+          "lines": [
+            1019,
+            1034
+          ]
+        }
+      ]
+    },
+    {
+      "id": "f5489d6d9cdf",
+      "change": "edited",
+      "statement": "While the diet filter is off, the recipe list pane shall list all recipes in a folder, keeping a recipe that fails the diet check in the list, dimmed and marked with a ✗",
+      "slots": {
+        "scope": "the recipe list pane",
+        "preconditions": [
+          "the diet filter is off"
+        ],
+        "verb": "list",
+        "object": "all recipes in a folder",
+        "modifiers": [
+          "keeping a recipe that fails the diet check in the list, dimmed and marked with a ✗"
+        ]
+      },
+      "previousStatement": "The recipe list pane shall list all recipes in a folder",
+      "previousSlots": {
+        "scope": "the recipe list pane",
+        "preconditions": [],
+        "verb": "list",
+        "object": "all recipes in a folder",
+        "modifiers": []
+      },
+      "quote": "I'd keep a failing recipe in place, dimmed and marked with a ✗, so you can still find it and remix it to fit",
+      "source": {
+        "messageId": "m7",
+        "author": "model"
+      },
+      "code": [
+        {
+          "file": "src/browser.ts",
+          "lines": [
+            669,
+            682
+          ]
+        },
+        {
+          "file": "src/layout.ts",
+          "lines": [
+            257,
+            257
+          ]
+        },
+        {
+          "file": "src/layout.ts",
+          "lines": [
+            425,
+            428
+          ]
+        },
+        {
+          "file": "src/layout.ts",
+          "lines": [
+            457,
+            475
+          ]
+        },
+        {
+          "file": "src/layout.test.ts",
+          "lines": [
+            369,
+            375
+          ]
+        },
+        {
+          "file": "src/layout.test.ts",
+          "lines": [
+            383,
+            400
+          ]
+        }
+      ]
+    },
+    {
+      "id": "11d580ef5101",
+      "change": "edited",
+      "statement": "Remix mode shall send the selected recipe, the typed note and the active diet profile to the LLM, asking for an adapted recipe that keeps to that diet",
+      "slots": {
+        "scope": "remix mode",
+        "preconditions": [],
+        "verb": "send",
+        "object": "the selected recipe, the typed note and the active diet profile to the LLM",
+        "modifiers": [
+          "asking for an adapted recipe that keeps to that diet"
+        ]
+      },
+      "previousStatement": "Remix mode shall send the selected recipe and the typed note to the LLM, under a system prompt that asks it to adapt the recipe",
+      "previousSlots": {
+        "scope": "remix mode",
+        "preconditions": [],
+        "verb": "send",
+        "object": "the selected recipe and the typed note to the LLM",
+        "modifiers": [
+          "under a system prompt that asks it to adapt the recipe"
+        ]
+      },
+      "quote": "our remix mode can be tuned to produce the version of this recipe that will suite the diet",
+      "source": {
+        "messageId": "m1",
+        "author": "user"
+      },
+      "code": [
+        {
+          "file": "src/remix.ts",
+          "lines": [
+            56,
+            56
+          ]
+        },
+        {
+          "file": "src/remix.ts",
+          "lines": [
+            85,
+            86
+          ]
+        },
+        {
+          "file": "src/remix.ts",
+          "lines": [
+            101,
+            132
+          ]
+        },
+        {
+          "file": "src/browser.ts",
+          "lines": [
+            1036,
+            1050
+          ]
+        },
+        {
+          "file": "src/browser.ts",
+          "lines": [
+            1225,
+            1238
+          ]
+        },
+        {
+          "file": "src/remix.test.ts",
+          "lines": [
+            86,
+            115
+          ]
+        }
+      ]
+    }
+  ]
+}
