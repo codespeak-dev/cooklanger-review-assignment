@@ -10,6 +10,20 @@ import {
   type Registry,
 } from './registry.js';
 import { copyToClipboard } from './clipboard.js';
+import {
+  allDiets,
+  checkKey,
+  checkRecipe,
+  dietKey,
+  readChecks,
+  readUserDiets,
+  withDiet,
+  withoutDiet,
+  writeChecks,
+  writeUserDiets,
+  type DietProfile,
+  type Verdict,
+} from './diets.js';
 import { anthropicApiKey } from './env.js';
 import {
   isFavourite,
@@ -30,6 +44,7 @@ import {
   wrapStyled,
   type OverlayViewModel,
   type Pane,
+  type PickerViewModel,
   type Size,
   type StyledLine,
   type ViewModel,
@@ -168,8 +183,31 @@ interface Draft {
   typed: string;
 }
 
+type DietDraft = { kind: 'dietName'; typed: string } | { kind: 'dietRules'; name: string; typed: string };
+
 /** Longer than any remark worth jotting down mid-cook. */
 const MAX_DRAFT_LENGTH = 500;
+const MAX_DIET_LENGTH = 1000;
+const MAX_DIET_NAME_LENGTH = 40;
+
+type PickerEntry = { kind: 'none' } | { kind: 'diet'; diet: DietProfile } | { kind: 'new' };
+
+interface DietPicker {
+  entries: PickerEntry[];
+  selected: number;
+  confirmDelete?: boolean;
+}
+
+const CHECK_CONCURRENCY = 4;
+
+interface CheckJob {
+  recipe: Recipe;
+  source: string;
+  key: string;
+  diet: DietProfile;
+  generation: number;
+  apiKey: string;
+}
 
 /** Control characters, which are keys rather than text. */
 const CONTROL_CHAR = /^[\x00-\x1f\x7f]$/;
@@ -242,10 +280,26 @@ export async function runBrowser(options: BrowserOptions): Promise<void> {
   /** Lookups run one at a time, so two of them cannot both rewrite the file. */
   let lookups: Promise<void> = Promise.resolve();
 
+  let diet: DietProfile | undefined;
+  let onlyFitting = false;
+  let userDiets: DietProfile[] = [];
+  let picker: DietPicker | undefined;
+  let verdicts = new Map<string, Verdict>();
+  let checks: Map<string, Verdict> | undefined;
+  let checksLoading: Promise<Map<string, Verdict>> | undefined;
+  let dietGeneration = 0;
+  let checkAborter = new AbortController();
+  let checkQueue: CheckJob[] = [];
+  let checkingPaths = new Set<string>();
+  let checksRunning = 0;
+  let checkFailureShown = false;
+  let checksSaving: Promise<void> = Promise.resolve();
+  let checksSaveQueued = false;
+
   let mode: Mode = 'recipes';
   let prompt: PersonsPrompt | undefined;
   let confirm: DeleteConfirm | undefined;
-  let draft: Draft | undefined;
+  let draft: Draft | DietDraft | undefined;
   /** Recipes on the shopping list, each already scaled for its own count. */
   let entries: ShoppingEntry[] = [];
   let shoppingOffset = 0;
@@ -454,18 +508,55 @@ export async function runBrowser(options: BrowserOptions): Promise<void> {
   };
 
   /** The overlay's chrome, which says which of the two drafts is open. */
-  const overlayFor = (open: Draft): OverlayViewModel =>
-    open.kind === 'note'
-      ? {
+  const overlayFor = (open: Draft | DietDraft): OverlayViewModel => {
+    switch (open.kind) {
+      case 'note':
+        return {
           title: `note on ${open.recipe.name}`,
           typed: open.typed,
           hint: 'return saves · esc cancels',
-        }
-      : {
-          title: `remix ${open.recipe.name}`,
+        };
+      case 'remix':
+        return {
+          title: diet ? `remix ${open.recipe.name} · ${diet.name}` : `remix ${open.recipe.name}`,
           typed: open.typed,
           hint: 'return asks Claude · esc cancels',
         };
+      case 'dietName':
+        return {
+          title: 'new diet: its name',
+          typed: open.typed,
+          hint: 'return goes on to what it rules out · esc cancels',
+        };
+      case 'dietRules':
+        return {
+          title: `diet ${open.name}: what it rules out`,
+          typed: open.typed,
+          hint: 'in plain words, as you would tell a cook · return saves · esc cancels',
+        };
+    }
+  };
+
+  const pickerView = (open: DietPicker): PickerViewModel => {
+    const entry = open.entries[open.selected];
+    const own = entry?.kind === 'diet' && !entry.diet.builtIn;
+    return {
+      title: 'diet',
+      items: open.entries.map((item) => {
+        if (item.kind === 'none') return { label: 'none', tag: diet ? undefined : 'on' };
+        if (item.kind === 'new') return { label: 'new…' };
+        const on = diet !== undefined && dietKey(diet.name) === dietKey(item.diet.name);
+        return { label: item.diet.name, tag: on ? 'on' : item.diet.builtIn ? undefined : 'yours' };
+      }),
+      selected: open.selected,
+      hint:
+        open.confirmDelete && entry?.kind === 'diet'
+          ? `Delete “${entry.diet.name}”? y deletes, anything else keeps it`
+          : own
+            ? 'return picks · d deletes · esc cancels'
+            : 'return picks · esc cancels',
+    };
+  };
 
   /** The prompt as the status line shows it, with a block for the cursor. */
   const promptLine = (): string =>
@@ -487,7 +578,7 @@ export async function runBrowser(options: BrowserOptions): Promise<void> {
         title: 'shopping list',
         lines,
         offset: shoppingOffset,
-        status: status ?? pending ?? background,
+        status: status ?? pending ?? background ?? checking(),
       },
       size,
       useColor,
@@ -517,8 +608,11 @@ export async function runBrowser(options: BrowserOptions): Promise<void> {
       recipes: visible.map((entry) => ({
         ...entry,
         favourite: isFavourite(favourites, entry.relativePath),
+        diet: diet ? (verdicts.get(entry.path) ?? 'pending') : undefined,
       })),
       filtered: onlyFavourites,
+      diet: diet?.name,
+      dietFilter: diet && onlyFitting ? diet.name : undefined,
       selected,
       listOffset,
       previewLines: preview,
@@ -531,8 +625,9 @@ export async function runBrowser(options: BrowserOptions): Promise<void> {
         ? promptLine()
         : confirm
           ? confirmLine()
-          : (status ?? pending ?? background),
+          : (status ?? pending ?? background ?? checking()),
       overlay: draft ? overlayFor(draft) : undefined,
+      picker: picker ? pickerView(picker) : undefined,
     };
 
     // Repaint in place rather than clearing first, so the screen never flashes.
@@ -572,9 +667,14 @@ export async function runBrowser(options: BrowserOptions): Promise<void> {
    * place.
    */
   const refreshVisible = (keep?: Recipe): void => {
-    visible = onlyFavourites
-      ? recipes.filter((recipe) => isFavourite(favourites, recipe.relativePath))
-      : recipes;
+    visible =
+      onlyFavourites || onlyFitting
+        ? recipes.filter(
+            (recipe) =>
+              (!onlyFavourites || isFavourite(favourites, recipe.relativePath)) &&
+              (!onlyFitting || verdicts.get(recipe.path) !== 'fail'),
+          )
+        : recipes;
 
     const index = keep ? visible.findIndex((entry) => entry.path === keep.path) : -1;
     if (index >= 0) selected = index;
@@ -669,6 +769,286 @@ export async function runBrowser(options: BrowserOptions): Promise<void> {
     );
   };
 
+  const checking = (): string | undefined => {
+    if (!diet) return undefined;
+    const left = checkingPaths.size;
+    if (left === 0) return undefined;
+    return `Checking ${left} ${left === 1 ? 'recipe' : 'recipes'} against ${diet.name}…`;
+  };
+
+  const applyVerdicts = (): void => {
+    const current = visible[selected];
+    refreshVisible(current);
+    if (visible[selected]?.path !== current?.path) {
+      previewOffset = 0;
+      ensureSelectionLoaded();
+    }
+    draw();
+  };
+
+  const saveChecks = (): void => {
+    if (checksSaveQueued) return;
+    checksSaveQueued = true;
+    checksSaving = checksSaving
+      .then(async () => {
+        checksSaveQueued = false;
+        if (checks) await writeChecks(options.root, checks);
+      })
+      .catch(() => {});
+  };
+
+  const pumpChecks = (): void => {
+    while (checksRunning < CHECK_CONCURRENCY && checkQueue.length > 0) {
+      const job = checkQueue.shift()!;
+      checksRunning += 1;
+      void runCheck(job).finally(() => {
+        checksRunning -= 1;
+        if (job.generation === dietGeneration) checkingPaths.delete(job.recipe.path);
+        if (!finished) pumpChecks();
+        draw();
+      });
+    }
+  };
+
+  const runCheck = async (job: CheckJob): Promise<void> => {
+    if (job.generation !== dietGeneration) return;
+    try {
+      const verdict = await checkRecipe(job.diet, job.source, job.apiKey, checkAborter.signal);
+      checks?.set(job.key, verdict);
+      saveChecks();
+      if (job.generation !== dietGeneration) return;
+      verdicts.set(job.recipe.path, verdict);
+      applyVerdicts();
+    } catch (error) {
+      if (job.generation !== dietGeneration || checkFailureShown) return;
+      checkFailureShown = true;
+      const why = error instanceof Error ? error.message : String(error);
+      setStatus(`Could not check “${job.recipe.name}” against ${job.diet.name} — ${why}`);
+    }
+  };
+
+  const sourceOf = async (recipe: Recipe): Promise<string | undefined> => {
+    const cached = previews.get(recipe.path)?.source;
+    if (cached !== undefined) return cached;
+    try {
+      return await readFile(recipe.path, 'utf8');
+    } catch {
+      return undefined;
+    }
+  };
+
+  const checkRecipes = async (targets: readonly Recipe[]): Promise<void> => {
+    const profile = diet;
+    if (!profile) return;
+    const generation = dietGeneration;
+
+    checksLoading ??= readChecks(options.root).then((read) => (checks = read));
+    const cache = await checksLoading;
+    const apiKey = await anthropicApiKey(options.root);
+    if (generation !== dietGeneration) return;
+
+    let answered = false;
+    let unanswered = 0;
+    for (const recipe of targets) {
+      const source = await sourceOf(recipe);
+      if (generation !== dietGeneration) return;
+      if (source === undefined) continue;
+
+      const key = checkKey(profile, source);
+      const cached = cache.get(key);
+      if (cached) {
+        verdicts.set(recipe.path, cached);
+        answered = true;
+        continue;
+      }
+      if (verdicts.delete(recipe.path)) answered = true;
+      if (checkingPaths.has(recipe.path)) continue;
+      if (!apiKey) {
+        unanswered += 1;
+        continue;
+      }
+      checkingPaths.add(recipe.path);
+      checkQueue.push({ recipe, source, key, diet: profile, generation, apiKey });
+    }
+
+    if (unanswered > 0 && !checkFailureShown) {
+      checkFailureShown = true;
+      setStatus(`Could not check recipes against ${profile.name} — no ANTHROPIC_API_KEY in .env`);
+    }
+    if (answered) applyVerdicts();
+    pumpChecks();
+    draw();
+  };
+
+  const setDiet = (next: DietProfile | undefined): void => {
+    const current = visible[selected];
+
+    diet = next;
+    dietGeneration += 1;
+    checkAborter.abort();
+    checkAborter = new AbortController();
+    verdicts = new Map();
+    checkQueue = [];
+    checkingPaths = new Set();
+    checkFailureShown = false;
+    if (!diet) onlyFitting = false;
+
+    refreshVisible(current);
+    if (visible[selected]?.path !== current?.path) {
+      previewOffset = 0;
+      ensureSelectionLoaded();
+    }
+
+    setStatus(diet ? `Checking recipes against ${diet.name}` : 'No diet on');
+    if (diet) void checkRecipes(recipes);
+    draw();
+  };
+
+  const openPicker = async (): Promise<void> => {
+    userDiets = await readUserDiets(options.root);
+    const entries: PickerEntry[] = [
+      { kind: 'none' },
+      ...allDiets(userDiets).map((entry): PickerEntry => ({ kind: 'diet', diet: entry })),
+      { kind: 'new' },
+    ];
+    const on = diet
+      ? entries.findIndex(
+          (entry) => entry.kind === 'diet' && dietKey(entry.diet.name) === dietKey(diet!.name),
+        )
+      : 0;
+    picker = { entries, selected: Math.max(on, 0) };
+    draw();
+  };
+
+  const choosePicked = (open: DietPicker): void => {
+    const entry = open.entries[open.selected];
+    picker = undefined;
+    if (!entry) return;
+    if (entry.kind === 'new') {
+      draft = { kind: 'dietName', typed: '' };
+      draw();
+      return;
+    }
+    setDiet(entry.kind === 'diet' ? entry.diet : undefined);
+  };
+
+  const deleteDiet = async (gone: DietProfile): Promise<void> => {
+    const next = withoutDiet(userDiets, gone.name);
+    try {
+      await writeUserDiets(options.root, next);
+    } catch (error) {
+      const why = error instanceof Error ? error.message : String(error);
+      setStatus(`Could not delete the diet “${gone.name}” — ${why}`);
+      draw();
+      return;
+    }
+
+    userDiets = next;
+    if (diet && dietKey(diet.name) === dietKey(gone.name)) setDiet(undefined);
+    await openPicker();
+    setStatus(`Deleted the diet “${gone.name}”`);
+    draw();
+  };
+
+  const handlePickerKey = (key: Key, open: DietPicker): void => {
+    const entry = open.entries[open.selected];
+    const move = (index: number): void => {
+      open.selected = Math.min(Math.max(index, 0), open.entries.length - 1);
+    };
+
+    if (open.confirmDelete) {
+      open.confirmDelete = false;
+      if ((key.value === 'y' || key.value === 'Y') && entry?.kind === 'diet') {
+        void deleteDiet(entry.diet);
+        return;
+      }
+      draw();
+      return;
+    }
+
+    const char = key.name === 'char' ? key.value : undefined;
+    if (key.name === 'escape' || char === 'q') {
+      picker = undefined;
+    } else if (key.name === 'enter') {
+      choosePicked(open);
+      return;
+    } else if (key.name === 'up' || char === 'k') {
+      move(open.selected - 1);
+    } else if (key.name === 'down' || char === 'j') {
+      move(open.selected + 1);
+    } else if (key.name === 'home' || char === 'g') {
+      move(0);
+    } else if (key.name === 'end' || char === 'G') {
+      move(open.entries.length - 1);
+    } else if (char === 'd' && entry?.kind === 'diet' && !entry.diet.builtIn) {
+      open.confirmDelete = true;
+    } else {
+      return;
+    }
+    draw();
+  };
+
+  const nameDiet = (name: string): void => {
+    const existing = allDiets(userDiets).find((entry) => dietKey(entry.name) === dietKey(name));
+    draft = {
+      kind: 'dietRules',
+      name: existing?.name ?? name,
+      typed: existing?.restrictions ?? '',
+    };
+    draw();
+  };
+
+  const saveDiet = async (name: string, restrictions: string): Promise<void> => {
+    const written: DietProfile = { name, restrictions: restrictions.trim(), builtIn: false };
+    const next = withDiet(userDiets, written);
+    try {
+      await writeUserDiets(options.root, next);
+    } catch (error) {
+      const why = error instanceof Error ? error.message : String(error);
+      setStatus(`Could not save the diet “${name}” — ${why}`);
+      draw();
+      return;
+    }
+
+    userDiets = next;
+    setDiet(written);
+    setStatus(`Saved the diet “${name}” — checking recipes against it`);
+    draw();
+  };
+
+  const toggleFitting = (): void => {
+    if (!diet) {
+      void openPicker();
+      return;
+    }
+
+    const current = visible[selected];
+    onlyFitting = !onlyFitting;
+    refreshVisible(current);
+    if (visible[selected]?.path !== current?.path) {
+      previewOffset = 0;
+      ensureSelectionLoaded();
+    }
+
+    setStatus(onlyFitting ? `Hiding recipes that break ${diet.name}` : 'Showing every recipe');
+  };
+
+  const dietRemix = (): void => {
+    if (!diet) {
+      void openPicker();
+      return;
+    }
+    const recipe = visible[selected];
+    if (!recipe) return;
+
+    if (verdicts.get(recipe.path) === 'pass') {
+      setStatus(`“${recipe.name}” already fits ${diet.name} — r remixes it with a note`);
+      draw();
+      return;
+    }
+    void remix({ kind: 'remix', recipe, typed: '' });
+  };
+
   const scrollPreview = (delta: number): void => {
     const layout = computeLayout(currentSize());
     const total = previewLines(visible[selected], layout.previewWidth).length;
@@ -736,28 +1116,48 @@ export async function runBrowser(options: BrowserOptions): Promise<void> {
       previewOffset = Number.MAX_SAFE_INTEGER;
     }
     setStatus(`Added a note to “${recipe.name}”`);
+    void checkRecipes([recipe]);
     draw();
   };
 
   /** Text, Return and Backspace while the overlay is open. */
-  const handleDraftKey = (key: Key, open: Draft): void => {
-    const what = open.kind === 'note' ? 'Note' : 'Remix';
+  const handleDraftKey = (key: Key, open: Draft | DietDraft): void => {
+    const what = open.kind === 'note' ? 'Note' : open.kind === 'remix' ? 'Remix' : 'Diet';
+    const limit =
+      open.kind === 'dietName'
+        ? MAX_DIET_NAME_LENGTH
+        : open.kind === 'dietRules'
+          ? MAX_DIET_LENGTH
+          : MAX_DRAFT_LENGTH;
 
     if (key.name === 'escape') {
       draft = undefined;
       setStatus(`${what} discarded`);
     } else if (key.name === 'enter') {
       draft = undefined;
-      if (open.typed.trim() === '') {
+      const typed = open.typed.trim();
+      if (typed === '') {
         setStatus(`${what} discarded — nothing was typed`);
       } else {
-        void (open.kind === 'note' ? saveNote(open) : remix(open));
-        return;
+        switch (open.kind) {
+          case 'note':
+            void saveNote(open);
+            return;
+          case 'remix':
+            void remix(open);
+            return;
+          case 'dietName':
+            nameDiet(typed);
+            return;
+          case 'dietRules':
+            void saveDiet(open.name, typed);
+            return;
+        }
       }
     } else if (key.name === 'backspace') {
       open.typed = open.typed.slice(0, -1);
     } else if (key.name === 'char' && key.value && !CONTROL_CHAR.test(key.value)) {
-      if (open.typed.length < MAX_DRAFT_LENGTH) open.typed += key.value;
+      if (open.typed.length < limit) open.typed += key.value;
     } else {
       // Arrows and the like do nothing rather than scrolling what is behind.
       return;
@@ -790,6 +1190,7 @@ export async function runBrowser(options: BrowserOptions): Promise<void> {
     // A recipe the model just wrote is the newest thing in the collection, and
     // whatever it invented its way into needs pricing like anything else.
     ensureNutrition(recipe);
+    void checkRecipes([recipe]);
   };
 
   /**
@@ -821,7 +1222,10 @@ export async function runBrowser(options: BrowserOptions): Promise<void> {
       return;
     }
 
-    pending = `Remixing “${recipe.name}”…`;
+    const keepTo = diet;
+    pending = keepTo
+      ? `Remixing “${recipe.name}” to fit ${keepTo.name}…`
+      : `Remixing “${recipe.name}”…`;
     draw();
 
     try {
@@ -829,6 +1233,7 @@ export async function runBrowser(options: BrowserOptions): Promise<void> {
         source,
         note: open.typed,
         name: recipe.name,
+        diet: keepTo,
         apiKey,
       });
       const path = await saveRemix(dirname(recipe.path), result, {
@@ -879,6 +1284,7 @@ export async function runBrowser(options: BrowserOptions): Promise<void> {
     if (index >= 0) recipes.splice(index, 1);
     previews.delete(recipe.path);
     renderCache.delete(recipe.path);
+    verdicts.delete(recipe.path);
 
     if (isFavourite(favourites, recipe.relativePath)) {
       favourites = withoutFavourite(favourites, recipe.relativePath);
@@ -1119,6 +1525,10 @@ export async function runBrowser(options: BrowserOptions): Promise<void> {
       handleDraftKey(key, draft);
       return;
     }
+    if (picker) {
+      handlePickerKey(key, picker);
+      return;
+    }
 
     if (char === 'q' || key.name === 'escape') {
       // Escape leaves the shopping list rather than the whole browser, which is
@@ -1195,6 +1605,15 @@ export async function runBrowser(options: BrowserOptions): Promise<void> {
           case 'F':
             toggleFilter();
             break;
+          case 'D':
+            void openPicker();
+            return;
+          case 'R':
+            dietRemix();
+            return;
+          case 'V':
+            toggleFitting();
+            break;
           case '+':
           case '=':
             changePersons(1);
@@ -1239,6 +1658,9 @@ export async function runBrowser(options: BrowserOptions): Promise<void> {
     finished = true;
 
     if (statusTimer) clearTimeout(statusTimer);
+    dietGeneration += 1;
+    checkQueue = [];
+    checkAborter.abort();
     input.off('data', onData);
     input.off('end', quit);
     output.off('resize', draw);

@@ -229,6 +229,7 @@ export interface RecipeRow {
   authorship?: 'llm' | 'human' | 'unknown';
   /** One of the cook's own, which earns a star and a place at the top. */
   favourite?: boolean;
+  diet?: 'pass' | 'fail' | 'pending';
 }
 
 /**
@@ -253,12 +254,29 @@ const LLM_BADGE = '[AI]';
  */
 const FAVOURITE_MARK = '★';
 
+const DIET_FAIL_MARK = '✗';
+const DIET_PENDING_MARK = '·';
+
 /** What the list pane says when it is showing nothing at all. */
 const EMPTY_LIST = 'no recipes';
 const EMPTY_FAVOURITES = 'no favourites';
 
 /** The pane title while only favourites are listed, in place of the folder. */
 const FAVOURITES_TITLE = 'favourites';
+
+function listTitle(view: ViewModel): string {
+  if (view.dietFilter !== undefined) {
+    return view.filtered ? `${FAVOURITES_TITLE} · ${view.dietFilter}` : `fits ${view.dietFilter}`;
+  }
+  return view.filtered ? FAVOURITES_TITLE : view.directory;
+}
+
+function emptyListText(view: ViewModel): string {
+  if (view.dietFilter !== undefined) {
+    return view.filtered ? `no favourites fit ${view.dietFilter}` : `nothing fits ${view.dietFilter}`;
+  }
+  return view.filtered ? EMPTY_FAVOURITES : EMPTY_LIST;
+}
 
 /** A single-line text input drawn on top of both panes. */
 export interface OverlayViewModel {
@@ -267,6 +285,18 @@ export interface OverlayViewModel {
   /** What has been typed so far; the cursor sits at its end. */
   typed: string;
   /** Shown under the input, dimmed, to say how to leave it. */
+  hint: string;
+}
+
+export interface PickerItem {
+  label: string;
+  tag?: string;
+}
+
+export interface PickerViewModel {
+  title: string;
+  items: readonly PickerItem[];
+  selected: number;
   hint: string;
 }
 
@@ -286,6 +316,9 @@ export interface ViewModel {
   overlay?: OverlayViewModel;
   /** Whether `recipes` is the whole folder or only the cook's favourites. */
   filtered?: boolean;
+  diet?: string;
+  dietFilter?: string;
+  picker?: PickerViewModel;
 }
 
 /**
@@ -309,6 +342,7 @@ interface Styles {
   selected: Style;
   unfocusedSelected: Style;
   dim: Style;
+  fail: Style;
 }
 
 const PLAIN: Styles = {
@@ -318,6 +352,7 @@ const PLAIN: Styles = {
   selected: plain,
   unfocusedSelected: plain,
   dim: plain,
+  fail: plain,
 };
 
 const COLORED: Styles = {
@@ -327,6 +362,7 @@ const COLORED: Styles = {
   selected: sgr('7'),
   unfocusedSelected: sgr('100'),
   dim: sgr('2'),
+  fail: sgr('31'),
 };
 
 /**
@@ -386,8 +422,11 @@ function listRows(view: ViewModel, layout: Layout, styles: Styles): string[] {
   const markWidth = view.recipes.some((recipe) => recipe.favourite)
     ? FAVOURITE_MARK.length + 1
     : 0;
-  const nameWidth = Math.max(layout.listWidth - badgeWidth, 1);
-  const empty = view.filtered ? EMPTY_FAVOURITES : EMPTY_LIST;
+  const dietWidth = view.recipes.some((recipe) => recipe.diet !== undefined)
+    ? DIET_FAIL_MARK.length + 1
+    : 0;
+  const nameWidth = Math.max(layout.listWidth - badgeWidth - dietWidth, 1);
+  const empty = emptyListText(view);
 
   const rows: string[] = [];
   for (let row = 0; row < layout.contentHeight; row += 1) {
@@ -415,10 +454,24 @@ function listRows(view: ViewModel, layout: Layout, styles: Styles): string[] {
     const mark =
       markWidth === 0 ? '' : recipe.favourite ? `${FAVOURITE_MARK} ` : ' '.repeat(markWidth);
     const text = fit(`${isSelected ? '›' : ' '} ${mark}${recipe.name}`, nameWidth) + badge;
-    if (!isSelected) {
-      rows.push(text);
+    const dietMark =
+      dietWidth === 0
+        ? ''
+        : recipe.diet === 'fail'
+          ? ` ${DIET_FAIL_MARK}`
+          : recipe.diet === 'pending'
+            ? ` ${DIET_PENDING_MARK}`
+            : ' '.repeat(dietWidth);
+
+    if (isSelected) {
+      const whole = text + dietMark;
+      rows.push(view.focus === 'list' ? styles.selected(whole) : styles.unfocusedSelected(whole));
+    } else if (recipe.diet === 'fail') {
+      rows.push(styles.dim(text) + styles.fail(dietMark));
+    } else if (recipe.diet === 'pending') {
+      rows.push(text + styles.dim(dietMark));
     } else {
-      rows.push(view.focus === 'list' ? styles.selected(text) : styles.unfocusedSelected(text));
+      rows.push(text + dietMark);
     }
   }
   return rows;
@@ -442,6 +495,16 @@ const OVERLAY_TEXT_ROWS = 4;
 /** Stands in for the terminal cursor, which stays hidden while the TUI runs. */
 const CURSOR = '█';
 
+function boxGeometry(layout: Layout): { inner: number; width: number; textWidth: number } {
+  const inner = layout.listWidth + layout.previewWidth + 1;
+  const width = Math.min(
+    Math.max(inner - OVERLAY_MARGIN * 2, MIN_OVERLAY_WIDTH),
+    OVERLAY_MAX_WIDTH,
+    inner,
+  );
+  return { inner, width, textWidth: Math.max(width - 4, 1) };
+}
+
 /**
  * Lays the overlay over the content rows it covers, keyed by row index.
  *
@@ -454,15 +517,7 @@ function overlayRows(
   layout: Layout,
   styles: Styles,
 ): Map<number, string> {
-  // The divider column belongs to the overlay too, so the box can sit astride it.
-  const inner = layout.listWidth + layout.previewWidth + 1;
-  const width = Math.min(
-    Math.max(inner - OVERLAY_MARGIN * 2, MIN_OVERLAY_WIDTH),
-    OVERLAY_MAX_WIDTH,
-    inner,
-  );
-  // Two border columns and a space of padding on each side.
-  const textWidth = Math.max(width - 4, 1);
+  const { textWidth } = boxGeometry(layout);
 
   // The cursor rides at the end of the text, so it also wraps with it — and it
   // keeps a trailing space the user typed from being trimmed away.
@@ -471,10 +526,38 @@ function overlayRows(
     ...typed.map((line) => fit(plainText(line), textWidth)),
     styles.dim(fit(overlay.hint, textWidth)),
   ];
+  return boxRows(overlay.title, body, layout, styles);
+}
 
+function pickerRows(
+  picker: PickerViewModel,
+  layout: Layout,
+  styles: Styles,
+): Map<number, string> {
+  const { textWidth } = boxGeometry(layout);
+  const room = Math.max(layout.contentHeight - 3, 1);
+  const offset = scrollToVisible(0, picker.selected, room, picker.items.length);
+
+  const body = picker.items.slice(offset, offset + room).map((item, row) => {
+    const isSelected = offset + row === picker.selected;
+    const tag = item.tag ? ` ${item.tag}` : '';
+    const label = fit(`${isSelected ? '›' : ' '} ${item.label}`, Math.max(textWidth - tag.length, 1));
+    return isSelected ? styles.selected(label + tag) : label + styles.dim(tag);
+  });
+  body.push(styles.dim(fit(picker.hint, textWidth)));
+  return boxRows(picker.title, body, layout, styles);
+}
+
+function boxRows(
+  title: string,
+  body: readonly string[],
+  layout: Layout,
+  styles: Styles,
+): Map<number, string> {
+  const { inner, width } = boxGeometry(layout);
   const edge = styles.focusedBorder;
   const box = [
-    edge('┌') + titledBorder(overlay.title, width - 2, edge, styles) + edge('┐'),
+    edge('┌') + titledBorder(title, width - 2, edge, styles) + edge('┐'),
     ...body.map((line) => `${edge('│')} ${line} ${edge('│')}`),
     edge('└') + edge('─'.repeat(width - 2)) + edge('┘'),
   ];
@@ -502,19 +585,26 @@ function overlayRows(
  * spelled out, and the last one is short enough for anything sane.
  */
 const KEY_HINTS = [
-  '↑↓ move · tab pane · -/+ persons · n note · r remix · d delete · a add · s list · o sort · f fav · F only · c copy · q quit',
-  '↑↓ move · tab · -/+ persons · n note · r remix · d del · a add · s list · o sort · f fav · F only · c copy · q quit',
-  '↑↓ move · tab · n note · r remix · d del · a add · s list · o sort · f fav · F only · c copy · q quit',
+  '↑↓ move · tab pane · -/+ persons · n note · r remix · d delete · a add · s list · o sort · f fav · F only · {diet} · c copy · q quit',
+  '↑↓ move · tab · -/+ persons · n note · r remix · d del · a add · s list · o sort · f fav · F only · {diet} · c copy · q quit',
+  '↑↓ move · tab · n note · r remix · d del · a add · s list · o sort · f fav · F only · {diet} · c copy · q quit',
+  '↑↓ move · n note · r remix · d del · a add · s list · f fav · {diet} · c copy · q quit',
   '↑↓ move · n note · r remix · d del · c copy · q quit',
   '↑↓ move · n note · d del · q quit',
 ];
+
+const DIET_HINTS = 'D diet';
+const ACTIVE_DIET_HINTS = 'D diet · R fit · V fits';
 
 /** The shopping list is the only one-pane screen, so it owns the panel hints. */
 const SHOPPING_KEY_HINTS = '↑↓ scroll · s recipes · c copy · q quit';
 
 /** The fullest hints that fit in `width` columns, else the sparsest set. */
-function keyHints(width: number): string {
-  return KEY_HINTS.find((hints) => hints.length <= width) ?? KEY_HINTS.at(-1)!;
+function keyHints(width: number, dietOn: boolean): string {
+  const sets = KEY_HINTS.map((hints) =>
+    hints.replace('{diet}', dietOn ? ACTIVE_DIET_HINTS : DIET_HINTS),
+  );
+  return sets.find((hints) => hints.length <= width) ?? sets.at(-1)!;
 }
 
 /** The bottom row: hints or a message on the left, a position on the right. */
@@ -525,12 +615,13 @@ function statusRow(text: string, position: string, width: number, styles: Styles
 
 function statusLine(view: ViewModel, layout: Layout, styles: Styles): string {
   const total = view.recipes.length;
-  const position = total > 0 ? `${view.selected + 1}/${total}` : '0/0';
+  const counted = total > 0 ? `${view.selected + 1}/${total}` : '0/0';
+  const position = view.diet !== undefined ? `${view.diet} · ${counted}` : counted;
   const width = layout.listWidth + layout.previewWidth + 3;
 
   // What `statusRow` will leave for the text, minus the space it prefixes.
   const room = width - position.length - 2;
-  return statusRow(view.status ?? keyHints(room), position, width, styles);
+  return statusRow(view.status ?? keyHints(room, view.diet !== undefined), position, width, styles);
 }
 
 /** A screen that is one full-width pane, such as the shopping list. */
@@ -588,12 +679,7 @@ export function renderScreen(view: ViewModel, size: Size, color = true): string[
       // be truncated away on a normal terminal. A filtered list says so here
       // instead, since which folder it came from matters less than the fact
       // that most of it is being held back.
-      titledBorder(
-        view.filtered ? FAVOURITES_TITLE : view.directory,
-        layout.listWidth,
-        listEdge,
-        styles,
-      ) +
+      titledBorder(listTitle(view), layout.listWidth, listEdge, styles) +
       previewEdge('┬') +
       titledBorder(selected?.relativePath ?? 'no recipe', layout.previewWidth, previewEdge, styles) +
       previewEdge('┐'),
@@ -601,7 +687,11 @@ export function renderScreen(view: ViewModel, size: Size, color = true): string[
 
   const left = listRows(view, layout, styles);
   const right = previewRows(view, layout, color);
-  const overlay = view.overlay ? overlayRows(view.overlay, layout, styles) : undefined;
+  const overlay = view.overlay
+    ? overlayRows(view.overlay, layout, styles)
+    : view.picker
+      ? pickerRows(view.picker, layout, styles)
+      : undefined;
   for (let row = 0; row < layout.contentHeight; row += 1) {
     const covered = overlay?.get(row);
     lines.push(

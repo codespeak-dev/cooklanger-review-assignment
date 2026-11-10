@@ -10,6 +10,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { DietProfile } from './diets.js';
 import { stripNotes } from './notes.js';
 import { AUTHORED_BY_KEY, normalizeKey } from './parser.js';
 import { RECIPE_EXTENSION } from './recipes.js';
@@ -52,6 +53,8 @@ Cooklang is plain text with the ingredients, cookware and timings marked up in p
 
 You are given a recipe and what the chef wants changed about it. Return the adapted recipe, whole, along with a title for it.
 
+Sometimes you are also given a diet the chef keeps, in their own words. The adapted recipe must keep to it completely: no ingredient it forbids, and nothing made from one — check the stock, the sauces and anything bought ready-made. Where an ingredient might or might not keep to it depending on what is bought, choose one that certainly does and name it plainly ("vegetable stock", "gluten-free soy sauce"). When the diet is the only thing asked for, change what the diet requires and whatever that change knocks loose, and keep the rest of the dish as it was.
+
 What you are after is a recipe of its own, and one worth cooking — not the old one with a word swapped. Be inventive about how you get there. A change rarely stays where it lands: swap one ingredient and the amounts around it, the seasoning, the liquid, the fat, the temperature, the timings and sometimes a whole step have to move with it. Work through the recipe looking for what the change has knocked loose, and fix it there rather than leaving the chef to find it at the stove. Then read the result as a cook would — does it balance, does the texture come out right, does every step still earn its place.
 
 Stay close to the spirit of the original: the dish it is, the way it is cooked, whatever the chef already likes about it. You are remixing this recipe, not writing a different one in its place.
@@ -80,6 +83,7 @@ export interface RemixRequest {
   source: string;
   /** What the cook wants changed. */
   note: string;
+  diet?: DietProfile;
   /** Display name of the recipe being remixed, for the model's bearings. */
   name: string;
   apiKey: string;
@@ -94,8 +98,22 @@ export interface Remix {
 /** A problem the browser can put in front of the cook as it is. */
 export class RemixError extends Error {}
 
+const DIET_ONLY_REQUEST = 'Make it keep to my diet.';
+
 /** The user turn: the recipe, then the request, each clearly fenced. */
 export function remixPrompt(request: RemixRequest): string {
+  const note = request.note.trim() || DIET_ONLY_REQUEST;
+  const diet = request.diet
+    ? [
+        '',
+        `The diet I keep, “${request.diet.name}” — the result must keep to it:`,
+        '',
+        '<diet>',
+        request.diet.restrictions.trim(),
+        '</diet>',
+      ]
+    : [];
+
   return [
     `The recipe is called “${request.name}”. Here it is:`,
     '',
@@ -108,8 +126,9 @@ export function remixPrompt(request: RemixRequest): string {
     'What I want changed:',
     '',
     '<request>',
-    request.note.trim(),
+    note,
     '</request>',
+    ...diet,
   ].join('\n');
 }
 

@@ -356,6 +356,127 @@ describe('renderScreen', () => {
   });
 });
 
+describe('renderScreen with a diet on', () => {
+  const size = { columns: 60, rows: 12 };
+  const recipes = [
+    { name: 'Apple Crumble', relativePath: 'a.cook', diet: 'pass' as const },
+    { name: 'Chicken Soup', relativePath: 'b.cook', diet: 'fail' as const },
+    { name: 'Pancakes', relativePath: 'c.cook', diet: 'pending' as const },
+  ];
+  const rowFor = (lines: string[], name: string): string =>
+    lines.find((line) => line.includes(name)) ?? '';
+
+  it('crosses a recipe that breaks the diet, and only that one', () => {
+    const lines = renderScreen(view({ recipes, diet: 'vegan' }), size, false);
+    assert.match(rowFor(lines, 'Chicken Soup'), /Chicken Soup\s+✗│/);
+    assert.ok(!rowFor(lines, 'Apple Crumble').includes('✗'));
+    assert.ok(!rowFor(lines, 'Pancakes').includes('✗'));
+    for (const line of lines) assert.equal(line.length, size.columns, line);
+  });
+
+  it('marks a recipe not checked yet as not known', () => {
+    const lines = renderScreen(view({ recipes, diet: 'vegan' }), size, false);
+    assert.match(rowFor(lines, 'Pancakes'), /Pancakes\s+·│/);
+    assert.ok(!rowFor(lines, 'Apple Crumble').includes('·'));
+  });
+
+  it('dims the row of a recipe that breaks the diet', () => {
+    const lines = renderScreen(view({ recipes, diet: 'vegan' }), size, true);
+    const row = rowFor(lines, 'Chicken Soup');
+    assert.match(row, /\x1b\[2m {2}Chicken Soup\s*\x1b\[0m/);
+    assert.ok(row.includes('\x1b[31m ✗\x1b[0m'));
+  });
+
+  it('puts the diet mark after the [AI] badge', () => {
+    const lines = renderScreen(
+      view({
+        recipes: [{ name: 'Beef Stew', relativePath: 'a.cook', authorship: 'llm', diet: 'fail' }],
+        diet: 'vegan',
+      }),
+      size,
+      false,
+    );
+    assert.match(rowFor(lines, 'Beef Stew'), /Beef Stew\s+\[AI\] ✗│/);
+  });
+
+  it('holds no room for the mark when no diet is on', () => {
+    const rows = renderScreen(view(), size, false).slice(1, -2);
+    assert.ok(!rows.some((line) => /[✗·]/.test(line)));
+  });
+
+  it('names the diet beside the position in the status line', () => {
+    const status = renderScreen(view({ recipes, diet: 'vegan' }), size, false).at(-1)!;
+    assert.match(status, /vegan · 1\/3 $/);
+  });
+
+  it('offers the diet keys in the hints', () => {
+    const off = renderScreen(view(), { columns: 160, rows: 12 }, false).at(-1)!;
+    assert.ok(off.includes('D diet') && !off.includes('V fits'));
+    const on = renderScreen(view({ diet: 'vegan' }), { columns: 160, rows: 12 }, false).at(-1)!;
+    assert.ok(on.includes('D diet · R fit · V fits'), on);
+  });
+
+  it('titles the list pane after the diet while recipes that break it are hidden', () => {
+    const size = { columns: 100, rows: 12 };
+    const lines = renderScreen(view({ diet: 'vegan', dietFilter: 'vegan' }), size, false);
+    assert.match(lines[0]!, /fits vegan/);
+    const both = renderScreen(view({ diet: 'vegan', dietFilter: 'vegan', filtered: true }), size, false);
+    assert.match(both[0]!, /favourites · vegan/);
+  });
+
+  it('says what an empty diet-filtered list is empty of', () => {
+    const size = { columns: 100, rows: 12 };
+    const empty = { recipes: [], previewLines: [], diet: 'vegan', dietFilter: 'vegan' };
+    assert.ok(renderScreen(view(empty), size, false).some((line) => line.includes('nothing fits vegan')));
+    assert.ok(
+      renderScreen(view({ ...empty, filtered: true }), size, false).some((line) =>
+        line.includes('no favourites fit vegan'),
+      ),
+    );
+  });
+});
+
+describe('renderScreen with a picker', () => {
+  const size = { columns: 60, rows: 14 };
+  const picker = {
+    title: 'diet',
+    items: [
+      { label: 'none' },
+      { label: 'vegetarian', tag: 'on' },
+      { label: 'low fodmap', tag: 'yours' },
+      { label: 'new…' },
+    ],
+    selected: 2,
+    hint: 'return picks · esc cancels',
+  };
+
+  it('shows every choice, the arrow, the tags and the hint, inside the frame', () => {
+    const lines = renderScreen(view({ picker }), size, false);
+    const screen = lines.join('\n');
+    assert.ok(screen.includes('diet'));
+    assert.match(screen, /› low fodmap\s+yours/);
+    assert.match(screen, / {2}vegetarian\s+on/);
+    assert.ok(screen.includes('new…'));
+    assert.ok(screen.includes('return picks · esc cancels'));
+    for (const line of lines) assert.equal(line.length, size.columns, line);
+  });
+
+  it('scrolls a list of choices longer than the screen to keep the arrow in view', () => {
+    const items = Array.from({ length: 30 }, (_, index) => ({ label: `diet ${index}` }));
+    const lines = renderScreen(view({ picker: { ...picker, items, selected: 25 } }), size, false);
+    const screen = lines.join('\n');
+    assert.ok(screen.includes('› diet 25'));
+    assert.ok(!screen.includes('diet 0 '));
+    for (const line of lines) assert.equal(line.length, size.columns, line);
+  });
+
+  it('stays rectangular once colour is switched on', () => {
+    const plain = renderScreen(view({ picker }), size, false);
+    const colored = renderScreen(view({ picker }), size, true);
+    assert.deepEqual(colored.map((line) => line.replace(/\x1b\[[\d;]*m/g, '')), plain);
+  });
+});
+
 describe('renderScreen with an overlay', () => {
   const size = { columns: 60, rows: 14 };
   const overlay = { title: 'note on Pancakes', typed: 'Rest it overnight', hint: 'esc cancels' };

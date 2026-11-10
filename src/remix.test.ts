@@ -82,6 +82,37 @@ describe('remixPrompt', () => {
 
     assert.ok(!prompt.includes('Add MORE pepper'));
   });
+
+  it('tells the model the diet the result has to keep to', () => {
+    const prompt = remixPrompt({
+      source: RECIPE,
+      note: 'make it spicier',
+      name: 'Roasted Tomato Soup',
+      diet: { name: 'nut-free', restrictions: 'No nuts of any kind.', builtIn: true },
+      apiKey: 'unused',
+    });
+
+    assert.ok(prompt.includes('make it spicier'));
+    assert.match(prompt, /“nut-free”/);
+    assert.match(prompt, /<diet>\nNo nuts of any kind\.\n<\/diet>/);
+  });
+
+  it('asks for the diet alone when no note was typed', () => {
+    const prompt = remixPrompt({
+      source: RECIPE,
+      note: '',
+      name: 'Roasted Tomato Soup',
+      diet: { name: 'vegan', restrictions: 'No animal products.', builtIn: true },
+      apiKey: 'unused',
+    });
+
+    assert.match(prompt, /<request>\nMake it keep to my diet\.\n<\/request>/);
+  });
+
+  it('says nothing about a diet when none is on', () => {
+    const prompt = remixPrompt({ source: RECIPE, note: 'x', name: 'Soup', apiKey: 'unused' });
+    assert.ok(!prompt.includes('<diet>'));
+  });
 });
 
 describe('slugForTitle', () => {
